@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getAccessToken } from "@/lib/auth";
-import { graph } from "@/lib/onedrive";
+import { getAccessToken } from "../../lib/auth";
+import { graph } from "../../lib/onedrive";
 import siteConfig from "../../../config/site.config";
 
 export default async function handler(
