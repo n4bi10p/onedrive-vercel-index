@@ -1,59 +1,38 @@
-import type { NextApiRequest, NextApiResponse } from 'next'
-import axios from 'axios'
-
-import { getAccessToken } from '.'
-import apiConfig from '../../../config/api.config'
-import siteConfig from '../../../config/site.config'
+import type { NextApiRequest, NextApiResponse } from "next";
+import { graph } from "../../lib/onedrive";
 
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  const { q = '' } = req.query
+  const q = (req.query.q as string)?.toLowerCase();
+  if (!q) return res.status(200).json([]);
 
-  if (typeof q !== 'string' || !q.trim()) {
-    return res.status(200).json([])
+  // Search OneDrive
+  const data = await graph(`/me/drive/root/search(q='${q}')`);
+
+  const shows = new Map<string, any>();
+
+  for (const item of data.value || []) {
+    if (!item.parentReference?.path) continue;
+
+    // Example path:
+    // /drive/root:/BotUpload/Streaming/Bleach/S01
+    const parts = item.parentReference.path.split("/");
+    const streamingIndex = parts.indexOf("Streaming");
+
+    if (streamingIndex === -1) continue;
+
+    const showName = parts[streamingIndex + 1];
+    if (!showName) continue;
+
+    if (!shows.has(showName)) {
+      shows.set(showName, {
+        title: showName,
+        href: `/BotUpload/Streaming/${showName}`
+      });
+    }
   }
 
-  try {
-    const accessToken = await getAccessToken()
-
-    // SAME Graph search used by UI
-    const searchApi = `${apiConfig.driveApi}/root/search(q='${q.replace(/'/g, "''")}')`
-
-    const { data } = await axios.get(searchApi, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      params: {
-        select: 'id,name,file,parentReference,size',
-        top: siteConfig.maxItems,
-      },
-    })
-
-    const baseDir = siteConfig.baseDirectory || ''
-
-    const results = data.value
-      .filter((item: any) => item.file)
-      .map((item: any) => {
-        const parentPath =
-          item.parentReference?.path?.replace('/drive/root:', '') || ''
-
-        return {
-          title: item.name,
-          path: parentPath + '/' + item.name,
-          size: item.size,
-        }
-      })
-      .filter((item: any) =>
-        baseDir ? item.path.startsWith(baseDir) : true
-      )
-
-    res.status(200).json(results)
-  } catch (error: any) {
-    console.error('Sora search error:', error?.response?.data || error)
-    res
-      .status(error?.response?.status ?? 500)
-      .json({ error: 'Sora search failed' })
-  }
+  res.status(200).json(Array.from(shows.values()));
 }
