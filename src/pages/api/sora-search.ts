@@ -1,28 +1,48 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import searchHandler from "./search";
+import { getAccessToken } from "@/lib/auth";
+import { graph } from "@/lib/onedrive";
+import siteConfig from "../../../config/site.config";
 
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  // Call existing search logic internally
   const q = req.query.q as string;
-  if (!q) return res.status(400).json([]);
 
-  // Manually call Graph (simpler + safer)
-  const result = await fetch(
-    `${process.env.NEXT_PUBLIC_BASE_URL}/api/search?q=${encodeURIComponent(q)}`
-  ).then(r => r.json());
+  if (!q) {
+    return res.status(200).json([]);
+  }
 
-  const files = result
-    .filter((item: any) => item.file)
-    .map((item: any) => ({
-      title: item.name,
-      path:
-        item.parentReference.path.replace("/drive/root:", "") +
-        "/" +
-        item.name
-    }));
+  try {
+    const token = await getAccessToken();
 
-  res.status(200).json(files);
+    // SAME Graph search used by UI
+    const result = await graph(token)
+      .api(`/me/drive/root/search(q='${q}')`)
+      .get();
+
+    const baseDir = siteConfig.baseDirectory || "";
+
+    const files = result.value
+      .filter((item: any) => item.file)
+      .map((item: any) => {
+        const parentPath =
+          item.parentReference?.path?.replace("/drive/root:", "") || "";
+
+        return {
+          title: item.name,
+          path: parentPath + "/" + item.name,
+          size: item.size
+        };
+      })
+      // restrict to base directory (BotUpload)
+      .filter(item =>
+        baseDir ? item.path.startsWith(baseDir) : true
+      );
+
+    res.status(200).json(files);
+  } catch (err) {
+    console.error("Sora search error:", err);
+    res.status(500).json({ error: "Sora search failed" });
+  }
 }
